@@ -1,0 +1,8 @@
+build/
+install/
+log/
+*.zip
+flight_bag.zip
+**/__pycache__/
+*.pyc
+.ros/

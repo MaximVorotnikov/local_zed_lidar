@@ -1,0 +1,42 @@
+# Extrinsics: bag has NO laser TF. Adjust these to your real mounting.
+# Frames: base_link is treated as body frame (≈ zed_camera_link by default).
+
+frames:
+  base_frame: base_link
+  laser_frame: laser
+  zed_frame: zed_camera_link
+  # base_link -> laser (meters, radians XYZ RPY)
+  base_to_laser: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  # base_link -> zed_camera_link
+  base_to_zed: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+# Used by offline_fuse.py
+#
+# Fusion mode = weighted blend of relative motions each ZED step:
+#   dx = w_zed * dx_zed + w_lidar * dx_lidar
+# On flight_ekf_02 best ICP convention was invert=false, flip=false
+# → fused loop ~0.17 m vs ZED ~1.14 m
+fusion:
+  w_zed: 0.35
+  w_lidar: 0.65
+  disagreement_threshold_m: 0.08
+  zed_disagreement_scale: 0.25
+  smooth_alpha: 0.0
+  flip_lidar_xy: false
+  invert_lidar_motion: false
+  use_zed: true
+  use_lidar: true
+  # For live robot_localization / odom_republisher
+  zed_cov_scale: 80.0
+  # rf2o on flight_ekf_02 mirrors ZED: launch defaults lidar_negate_x/y=true
+  lidar_negate_x: true
+  lidar_negate_y: true
+  lidar_negate_yaw: false
+  lidar_var_xy: 0.02
+  lidar_var_yaw: 0.01
+  process_var_xy: 0.05
+  process_var_yaw: 0.02
+
+bag:
+  default_path: /home/max/flight_ekf_02
+  output_dir: /home/max/local_zed_lidar/ekf_tuning_output
