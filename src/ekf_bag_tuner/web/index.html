@@ -158,33 +158,98 @@
       view = { cx, cy, half };
     }
 
+    function niceStep(half) {
+      const stepGuess = half / 4;
+      const mag = Math.pow(10, Math.floor(Math.log10(Math.max(stepGuess, 1e-9))));
+      const norm = stepGuess / mag;
+      return (norm < 1.5 ? 1 : norm < 3.5 ? 2 : 5) * mag;
+    }
+
+    function formatMeters(v, step) {
+      const abs = Math.abs(v);
+      if (step >= 1) return v.toFixed(0);
+      if (step >= 0.1) return v.toFixed(1);
+      if (step >= 0.01) return v.toFixed(2);
+      return v.toFixed(3);
+    }
+
     function drawGrid(w, h) {
+      const step = niceStep(view.half);
+      const x0 = Math.floor((view.cx - view.half * 1.2) / step) * step;
+      const y0 = Math.floor((view.cy - view.half * 1.2) / step) * step;
+      const x1 = view.cx + view.half * 1.2;
+      const y1 = view.cy + view.half * 1.2;
+
       ctx.strokeStyle = '#2a3548';
       ctx.lineWidth = 1;
-      const stepGuess = view.half / 4;
-      const mag = Math.pow(10, Math.floor(Math.log10(stepGuess)));
-      const norm = stepGuess / mag;
-      const step = (norm < 1.5 ? 1 : norm < 3.5 ? 2 : 5) * mag;
-      const x0 = Math.floor((view.cx - view.half) / step) * step;
-      const y0 = Math.floor((view.cy - view.half) / step) * step;
       ctx.beginPath();
-      for (let x = x0; x <= view.cx + view.half + 1e-9; x += step) {
+      for (let x = x0; x <= x1 + 1e-9; x += step) {
         const [px] = worldToPx(x, 0, w, h);
         ctx.moveTo(px, 0); ctx.lineTo(px, h);
       }
-      for (let y = y0; y <= view.cy + view.half + 1e-9; y += step) {
+      for (let y = y0; y <= y1 + 1e-9; y += step) {
         const [, py] = worldToPx(0, y, w, h);
         ctx.moveTo(0, py); ctx.lineTo(w, py);
       }
       ctx.stroke();
 
-      // axes
+      // axes through origin when visible, else through center of view
+      const [ox, oy] = worldToPx(0, 0, w, h);
+      const axisY = (oy >= 0 && oy <= h) ? oy : h - 28;
+      const axisX = (ox >= 0 && ox <= w) ? ox : 44;
       ctx.strokeStyle = '#3a4f70';
       ctx.beginPath();
-      const [ox, oy] = worldToPx(0, 0, w, h);
-      ctx.moveTo(0, oy); ctx.lineTo(w, oy);
-      ctx.moveTo(ox, 0); ctx.lineTo(ox, h);
+      ctx.moveTo(0, axisY); ctx.lineTo(w, axisY);
+      ctx.moveTo(axisX, 0); ctx.lineTo(axisX, h);
       ctx.stroke();
+
+      // meter tick labels
+      ctx.fillStyle = '#c5d0e0';
+      ctx.font = '11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+      ctx.textBaseline = 'top';
+      for (let x = x0; x <= x1 + 1e-9; x += step) {
+        const [px] = worldToPx(x, 0, w, h);
+        if (px < 8 || px > w - 8) continue;
+        const label = formatMeters(x, step);
+        ctx.textAlign = 'center';
+        const ly = Math.min(h - 14, Math.max(4, axisY + 4));
+        ctx.fillText(label, px, ly);
+      }
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      for (let y = y0; y <= y1 + 1e-9; y += step) {
+        const [, py] = worldToPx(0, y, w, h);
+        if (py < 12 || py > h - 12) continue;
+        const label = formatMeters(y, step);
+        const lx = Math.max(36, Math.min(w - 8, axisX - 6));
+        ctx.fillText(label, lx, py);
+      }
+
+      // axis titles
+      ctx.fillStyle = '#8b9bb4';
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText('X [m]', w - 10, Math.min(h - 4, axisY - 6));
+      ctx.save();
+      ctx.translate(12, 24);
+      ctx.rotate(-Math.PI / 2);
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'top';
+      ctx.fillText('Y [m]', 0, 0);
+      ctx.restore();
+    }
+
+    function latestReadout() {
+      const parts = [];
+      for (const name of NAMES) {
+        const xs = paths[name].x, ys = paths[name].y;
+        if (!xs.length) continue;
+        parts.push(
+          `${name}: (${xs[xs.length - 1].toFixed(2)}, ${ys[ys.length - 1].toFixed(2)}) m`
+        );
+      }
+      return parts.join('   ');
     }
 
     function drawPath(name, w, h) {
@@ -220,8 +285,11 @@
       for (const name of NAMES) drawPath(name, w, h);
       ctx.fillStyle = '#8b9bb4';
       ctx.font = '12px sans-serif';
-      ctx.fillText(follow ? 'AUTO-FIT' : 'MANUAL', 10, 18);
-      ctx.fillText(`half=${view.half.toFixed(2)} m`, 10, 34);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText(follow ? 'AUTO-FIT' : 'MANUAL', 48, 8);
+      const read = latestReadout();
+      if (read) ctx.fillText(read, 48, 24);
     }
 
     fitBtn.addEventListener('click', () => {
