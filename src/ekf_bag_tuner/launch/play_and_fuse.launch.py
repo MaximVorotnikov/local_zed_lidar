@@ -78,6 +78,7 @@ def generate_launch_description():
         DeclareLaunchArgument('lidar_negate_yaw', default_value='false'),
         DeclareLaunchArgument('w_zed', default_value='0.15'),
         DeclareLaunchArgument('w_lidar', default_value='0.85'),
+        DeclareLaunchArgument('fused_pose_topic', default_value='/odometry/filtered'),
 
         _node(
             package='tf2_ros',
@@ -143,7 +144,8 @@ def generate_launch_description():
                 'use_sim_time': True,
                 'zed_topic': '/zed/zed_node/odom',
                 'lidar_topic': '/lidar/odom',
-                'output_topic': '/odometry/filtered',
+                'output_topic': LaunchConfiguration('fused_pose_topic'),
+                'output_frame_id': '',
                 'odom_frame': 'odom_fused',
                 'base_frame': 'base_link',
                 'publish_tf': True,
@@ -151,8 +153,6 @@ def generate_launch_description():
                     LaunchConfiguration('w_zed'), value_type=float),
                 'w_lidar': ParameterValue(
                     LaunchConfiguration('w_lidar'), value_type=float),
-                'disagreement_threshold_m': 0.08,
-                'zed_disagreement_scale': 0.25,
             }],
         ),
 
@@ -163,6 +163,9 @@ def generate_launch_description():
             parameters=[{
                 'use_sim_time': True,
                 'output_dir': output_dir,
+                'zed_topic': '/zed/zed_node/odom',
+                'lidar_topic': '/lidar/odom',
+                'fused_topic': LaunchConfiguration('fused_pose_topic'),
             }],
         ),
 
@@ -176,6 +179,9 @@ def generate_launch_description():
                 'output_dir': output_dir,
                 'update_hz': 5.0,
                 'save_on_shutdown': True,
+                'zed_topic': '/zed/zed_node/odom',
+                'lidar_topic': '/lidar/odom',
+                'fused_topic': LaunchConfiguration('fused_pose_topic'),
             }],
         ),
 

@@ -7,6 +7,7 @@ import os
 from collections import deque
 
 import rclpy
+from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 
@@ -20,6 +21,9 @@ class LivePlotter(Node):
         self.declare_parameter('save_on_shutdown', True)
         self.declare_parameter('margin_m', 0.5)
         self.declare_parameter('min_span_m', 2.0)
+        self.declare_parameter('zed_topic', '/zed/zed_node/odom')
+        self.declare_parameter('lidar_topic', '/lidar/odom')
+        self.declare_parameter('fused_topic', '/odometry/filtered')
 
         self.max_points = int(self.get_parameter('max_points').value)
         self.out_dir = str(self.get_parameter('output_dir').value).strip()
@@ -37,9 +41,12 @@ class LivePlotter(Node):
         self.follow_data = True  # auto square fit; off after manual zoom/pan
         self._setting_limits = False
 
-        self.create_subscription(Odometry, '/zed/zed_node/odom', lambda m: self.on_odom(m, 'zed'), 50)
-        self.create_subscription(Odometry, '/lidar/odom', lambda m: self.on_odom(m, 'lidar'), 50)
-        self.create_subscription(Odometry, '/odometry/filtered', lambda m: self.on_odom(m, 'fused'), 50)
+        zed_t = self.get_parameter('zed_topic').value
+        lidar_t = self.get_parameter('lidar_topic').value
+        fused_t = self.get_parameter('fused_topic').value
+        self.create_subscription(Odometry, zed_t, lambda m: self.on_odom(m, 'zed'), 50)
+        self.create_subscription(Odometry, lidar_t, lambda m: self.on_odom(m, 'lidar'), 50)
+        self.create_subscription(PoseStamped, fused_t, lambda m: self.on_pose(m, 'fused'), 50)
 
         import matplotlib
         if os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'):
@@ -164,6 +171,12 @@ class LivePlotter(Node):
 
     def on_odom(self, msg: Odometry, name: str):
         p = msg.pose.pose.position
+        self.paths[name]['x'].append(float(p.x))
+        self.paths[name]['y'].append(float(p.y))
+        self.dirty = True
+
+    def on_pose(self, msg: PoseStamped, name: str):
+        p = msg.pose.position
         self.paths[name]['x'].append(float(p.x))
         self.paths[name]['y'].append(float(p.y))
         self.dirty = True

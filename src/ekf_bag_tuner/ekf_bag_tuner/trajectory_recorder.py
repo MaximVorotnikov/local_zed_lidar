@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Record ZED / lidar / fused odometry to CSV while bag plays."""
+"""Record ZED / lidar odom + fused PoseStamped to CSV."""
 
 import csv
 import math
 from pathlib import Path
 
 import rclpy
-from rclpy.node import Node
+from geometry_msgs.msg import PoseStamped, Quaternion
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import Quaternion
+from rclpy.node import Node
 
 
 def yaw_of(q: Quaternion) -> float:
@@ -19,6 +19,10 @@ class TrajectoryRecorder(Node):
     def __init__(self):
         super().__init__('trajectory_recorder')
         self.declare_parameter('output_dir', '/tmp/ekf_tuning_output')
+        self.declare_parameter('zed_topic', '/zed/zed_node/odom')
+        self.declare_parameter('lidar_topic', '/lidar/odom')
+        self.declare_parameter('fused_topic', '/odometry/filtered')
+
         out = Path(self.get_parameter('output_dir').value)
         out.mkdir(parents=True, exist_ok=True)
         self.files = {}
@@ -32,15 +36,25 @@ class TrajectoryRecorder(Node):
             self.writers[name] = w
             self.get_logger().info(f'Writing {path}')
 
-        self.create_subscription(Odometry, '/zed/zed_node/odom', lambda m: self.on_odom(m, 'zed'), 50)
-        self.create_subscription(Odometry, '/lidar/odom', lambda m: self.on_odom(m, 'lidar'), 50)
-        self.create_subscription(Odometry, '/odometry/filtered', lambda m: self.on_odom(m, 'fused'), 50)
+        zed_t = self.get_parameter('zed_topic').value
+        lidar_t = self.get_parameter('lidar_topic').value
+        fused_t = self.get_parameter('fused_topic').value
+        self.create_subscription(Odometry, zed_t, lambda m: self.on_odom(m, 'zed'), 50)
+        self.create_subscription(Odometry, lidar_t, lambda m: self.on_odom(m, 'lidar'), 50)
+        self.create_subscription(PoseStamped, fused_t, lambda m: self.on_pose(m, 'fused'), 50)
+
+    def _write(self, name, t, x, y, z, yaw):
+        self.writers[name].writerow([f'{t:.6f}', f'{x:.6f}', f'{y:.6f}', f'{z:.6f}', f'{yaw:.6f}'])
 
     def on_odom(self, msg: Odometry, name: str):
         t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         p = msg.pose.pose.position
-        yaw = yaw_of(msg.pose.pose.orientation)
-        self.writers[name].writerow([f'{t:.6f}', f'{p.x:.6f}', f'{p.y:.6f}', f'{p.z:.6f}', f'{yaw:.6f}'])
+        self._write(name, t, p.x, p.y, p.z, yaw_of(msg.pose.pose.orientation))
+
+    def on_pose(self, msg: PoseStamped, name: str):
+        t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        p = msg.pose.position
+        self._write(name, t, p.x, p.y, p.z, yaw_of(msg.pose.orientation))
 
     def destroy_node(self):
         for f in self.files.values():
@@ -53,7 +67,6 @@ def main():
     rclpy.init()
     node = TrajectoryRecorder()
     try:
-        # Wall-time spin_once so shutdown works after /clock stops with the bag.
         while rclpy.ok():
             rclpy.spin_once(node, timeout_sec=0.2)
     except KeyboardInterrupt:

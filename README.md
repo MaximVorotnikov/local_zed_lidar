@@ -78,9 +78,52 @@ If live lidar looks mirrored vs ZED, toggle:
 
 Weights: `w_zed:=0.15` `w_lidar:=0.85` (live rf2o closes loop well — trust lidar more).
 
+Fused output is **`geometry_msgs/PoseStamped`** on `/odometry/filtered` (same type as
+`/zed/zed_node/pose`). Remount with `fused_pose_topic:=/zed/zed_node/pose` when wiring
+to the flight controller (and stop the original ZED pose pub on that name).
+
+## Realtime (no bag) — your vehicle publishes /scan + ZED odom
+
+```bash
+cd /home/max/local_zed_lidar
+source install/setup.bash
+
+# 1) Start your real system (ZED node, lidar driver, …)
+
+# 2) Start fuse (wall clock, no bag)
+ros2 launch ekf_bag_tuner fuse_realtime.launch.py \
+  use_plot:=true \
+  use_rviz:=false \
+  fused_pose_topic:=/odometry/filtered
+```
+
+Check type/topic:
+
+```bash
+ros2 topic info /odometry/filtered -v
+# Type: geometry_msgs/msg/PoseStamped
+```
+
+When ready to feed the autopilot the same way as ZED pose:
+
+```bash
+ros2 launch ekf_bag_tuner fuse_realtime.launch.py \
+  fused_pose_topic:=/zed/zed_node/pose \
+  use_plot:=true
+```
+
+**Important:** only one publisher should own `/zed/zed_node/pose`. Either remount FC
+to `/odometry/filtered`, or disable ZED's pose publisher when using `fused_pose_topic:=/zed/zed_node/pose`.
+
+Inputs expected from your system:
+- `/scan` — `sensor_msgs/LaserScan`
+- `/zed/zed_node/odom` — `nav_msgs/Odometry`  
+  (override with `scan_topic:=...` / `zed_odom_topic:=...` if names differ)
+
 ## Notes
 
 - Bag `/tf` has no `laser` frame — launch publishes `base_link→laser` (edit `laser_x/y/z/yaw` if needed).
 - ZED bag covariance is tiny (~1e-6); offline fuse uses **relative Δpose weights**, not raw absolute cov.
 - Live default fuse = lidar-primary SE2 align + light ZED XY pull (`relative_fuse`).
-- Height stays on rangefinder → ArduPilot; this workspace fuses **XY only**.
+- Fused XY from blend; **Z height copied from ZED** (lidar is 2D).
+- Height control can stay on rangefinder → ArduPilot; this workspace fuses **XY** (+ yaw/Z passthrough from ZED).

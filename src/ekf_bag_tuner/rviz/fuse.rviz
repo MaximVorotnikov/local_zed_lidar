@@ -48,7 +48,7 @@ Visualization Manager:
       Shape:
         Value: Arrow
       Color: 0; 200; 0
-    - Class: rviz_default_plugins/Odometry
+    - Class: rviz_default_plugins/Pose
       Name: Fused
       Enabled: true
       Topic:
@@ -57,10 +57,9 @@ Visualization Manager:
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-      Keep: 500
-      Shape:
-        Value: Arrow
+      Shape: Arrow
       Color: 255; 50; 50
+      Arrow Length: 0.35
   Global Options:
     Fixed Frame: odom_fused
   Name: root

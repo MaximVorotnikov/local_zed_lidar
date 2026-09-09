@@ -1,16 +1,8 @@
 #!/usr/bin/env python3
-"""Live ZED + lidar fusion.
+"""Live ZED + lidar fusion → geometry_msgs/PoseStamped.
 
-Why not robot_localization EKF:
-  Two differential odoms with different header frames (odom vs lidar_odom) and
-  no connecting TF produced worse loop error than either sensor alone.
-
-Why not naive Δ-blend:
-  rf2o yaw correlates poorly with ZED (~0.1), so body/world blends scramble XY.
-
-What works on flight_ekf_02 (after lidar XY negate):
-  Corrected rf2o closes the loop to ~0.03 m. Use SE2-aligned lidar for XY and
-  ZED for yaw. Optional small pull toward ZED XY via w_zed (default 0.15).
+Lidar-primary: SE2-align corrected rf2o to ZED, blend XY, yaw/z from ZED.
+Output type matches /zed/zed_node/pose so the flight stack can remount the topic.
 """
 
 from __future__ import annotations
@@ -19,7 +11,7 @@ import math
 from collections import deque
 
 import rclpy
-from geometry_msgs.msg import Quaternion, TransformStamped
+from geometry_msgs.msg import PoseStamped, Quaternion, TransformStamped
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from tf2_ros import TransformBroadcaster
@@ -45,11 +37,12 @@ class RelativeFuse(Node):
         super().__init__('relative_fuse')
         self.declare_parameter('zed_topic', '/zed/zed_node/odom')
         self.declare_parameter('lidar_topic', '/lidar/odom')
+        # Same type as /zed/zed_node/pose — remount name only when wiring to FC
         self.declare_parameter('output_topic', '/odometry/filtered')
-        self.declare_parameter('odom_frame', 'odom_fused')
+        self.declare_parameter('output_frame_id', '')  # empty → use ZED odom frame_id
+        self.declare_parameter('odom_frame', 'odom_fused')  # TF parent if publish_tf
         self.declare_parameter('base_frame', 'base_link')
         self.declare_parameter('publish_tf', True)
-        # w_zed: pull fused XY toward ZED after lidar is SE2-aligned (0 = pure lidar XY)
         self.declare_parameter('w_zed', 0.15)
         self.declare_parameter('w_lidar', 0.85)
         self.declare_parameter('lidar_buffer_sec', 2.0)
@@ -61,20 +54,21 @@ class RelativeFuse(Node):
             self.w_zed /= s
             self.w_lidar /= s
         self.buf_sec = float(self.get_parameter('lidar_buffer_sec').value)
+        self.output_frame_id = str(self.get_parameter('output_frame_id').value).strip()
         self.odom_frame = self.get_parameter('odom_frame').value
         self.base_frame = self.get_parameter('base_frame').value
         self.publish_tf = bool(self.get_parameter('publish_tf').value)
 
-        self.zed = None  # (t, x, y, yaw)
+        self.zed = None  # (t, x, y, z, yaw)
+        self.zed_frame = 'odom'
         self.lidar_buf = deque()
-        # SE2 that maps lidar frame → ZED frame (fixed after first pair)
         self.aligned = False
         self.dth = 0.0
         self.tx = 0.0
         self.ty = 0.0
 
         out = self.get_parameter('output_topic').value
-        self.pub = self.create_publisher(Odometry, out, 30)
+        self.pub = self.create_publisher(PoseStamped, out, 30)
         self.tf_br = TransformBroadcaster(self) if self.publish_tf else None
 
         zed_t = self.get_parameter('zed_topic').value
@@ -83,7 +77,7 @@ class RelativeFuse(Node):
         self.create_subscription(Odometry, lidar_t, self.on_lidar, 30)
         self.get_logger().info(
             f'Lidar-primary fuse {zed_t} + {lidar_t} -> {out} '
-            f'(w_zed={self.w_zed:.2f}, w_lidar={self.w_lidar:.2f})'
+            f'(PoseStamped, w_zed={self.w_zed:.2f}, w_lidar={self.w_lidar:.2f})'
         )
 
     def on_lidar(self, msg: Odometry):
@@ -94,14 +88,14 @@ class RelativeFuse(Node):
         t_cut = t - self.buf_sec
         while len(self.lidar_buf) > 1 and self.lidar_buf[0][0] < t_cut:
             self.lidar_buf.popleft()
-        # Publish on lidar rate — primary XY source
         self._try_publish(msg.header.stamp)
 
     def on_zed(self, msg: Odometry):
         t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         p = msg.pose.pose.position
-        self.zed = (t, p.x, p.y, yaw_of(msg.pose.pose.orientation))
-        # Do not publish here — avoids double-rate CSV / marker spam
+        self.zed = (t, p.x, p.y, p.z, yaw_of(msg.pose.pose.orientation))
+        if msg.header.frame_id:
+            self.zed_frame = msg.header.frame_id
 
     def _lidar_latest(self):
         return self.lidar_buf[-1] if self.lidar_buf else None
@@ -121,7 +115,7 @@ class RelativeFuse(Node):
         if lid is None:
             return
 
-        _, zx, zy, zyaw = self.zed
+        _, zx, zy, zz, zyaw = self.zed
         _, lx, ly, lyaw = lid
 
         if not self.aligned:
@@ -135,24 +129,22 @@ class RelativeFuse(Node):
             )
 
         mx, my, _ = self._map_lidar(lx, ly, lyaw)
-        # Blend XY in the shared ZED-aligned frame; heading from ZED
         x = self.w_lidar * mx + self.w_zed * zx
         y = self.w_lidar * my + self.w_zed * zy
         yaw = zyaw
-        self._publish(stamp, x, y, yaw)
+        self._publish(stamp, x, y, zz, yaw)
 
-    def _publish(self, stamp, x, y, yaw):
-        out = Odometry()
+    def _publish(self, stamp, x, y, z, yaw):
+        frame = self.output_frame_id or self.zed_frame or self.odom_frame
+        q = quat_from_yaw(yaw)
+
+        out = PoseStamped()
         out.header.stamp = stamp
-        out.header.frame_id = self.odom_frame
-        out.child_frame_id = self.base_frame
-        out.pose.pose.position.x = x
-        out.pose.pose.position.y = y
-        out.pose.pose.orientation = quat_from_yaw(yaw)
-        cov = [0.0] * 36
-        cov[0] = cov[7] = 0.05
-        cov[35] = 0.02
-        out.pose.covariance = cov
+        out.header.frame_id = frame
+        out.pose.position.x = x
+        out.pose.position.y = y
+        out.pose.position.z = z  # height from ZED (XY fused; Z not from lidar)
+        out.pose.orientation = q
         self.pub.publish(out)
 
         if self.tf_br is not None:
@@ -162,7 +154,8 @@ class RelativeFuse(Node):
             tf.child_frame_id = self.base_frame
             tf.transform.translation.x = x
             tf.transform.translation.y = y
-            tf.transform.rotation = out.pose.pose.orientation
+            tf.transform.translation.z = z
+            tf.transform.rotation = q
             self.tf_br.sendTransform(tf)
 
 
