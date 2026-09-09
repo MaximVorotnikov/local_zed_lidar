@@ -5,10 +5,9 @@ Expects your vehicle stack to already publish:
   /scan                  sensor_msgs/LaserScan
   /zed/zed_node/odom     nav_msgs/Odometry
 
-Publishes fused pose as geometry_msgs/PoseStamped (same type as /zed/zed_node/pose):
+Publishes fused odometry as nav_msgs/Odometry:
   default: /odometry/filtered
-  for FC drop-in: fused_pose_topic:=/zed/zed_node/pose
-  (then disable / remount the original ZED pose publisher to avoid two pubs)
+  remount with fused_pose_topic:=... if needed
 """
 
 from launch import LaunchDescription

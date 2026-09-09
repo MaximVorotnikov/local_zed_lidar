@@ -78,9 +78,7 @@ If live lidar looks mirrored vs ZED, toggle:
 
 Weights: `w_zed:=0.15` `w_lidar:=0.85` (live rf2o closes loop well — trust lidar more).
 
-Fused output is **`geometry_msgs/PoseStamped`** on `/odometry/filtered` (same type as
-`/zed/zed_node/pose`). Remount with `fused_pose_topic:=/zed/zed_node/pose` when wiring
-to the flight controller (and stop the original ZED pose pub on that name).
+Fused output is **`nav_msgs/Odometry`** on `/odometry/filtered`.
 
 ## Realtime (no bag) — your vehicle publishes /scan + ZED odom
 
@@ -101,19 +99,8 @@ Check type/topic:
 
 ```bash
 ros2 topic info /odometry/filtered -v
-# Type: geometry_msgs/msg/PoseStamped
+# Type: nav_msgs/msg/Odometry
 ```
-
-When ready to feed the autopilot the same way as ZED pose:
-
-```bash
-ros2 launch ekf_bag_tuner fuse_realtime.launch.py \
-  fused_pose_topic:=/zed/zed_node/pose \
-  use_plot:=true
-```
-
-**Important:** only one publisher should own `/zed/zed_node/pose`. Either remount FC
-to `/odometry/filtered`, or disable ZED's pose publisher when using `fused_pose_topic:=/zed/zed_node/pose`.
 
 Inputs expected from your system:
 - `/scan` — `sensor_msgs/LaserScan`

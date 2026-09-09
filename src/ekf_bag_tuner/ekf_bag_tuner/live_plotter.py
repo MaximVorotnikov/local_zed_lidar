@@ -7,7 +7,6 @@ import os
 from collections import deque
 
 import rclpy
-from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 
@@ -46,7 +45,7 @@ class LivePlotter(Node):
         fused_t = self.get_parameter('fused_topic').value
         self.create_subscription(Odometry, zed_t, lambda m: self.on_odom(m, 'zed'), 50)
         self.create_subscription(Odometry, lidar_t, lambda m: self.on_odom(m, 'lidar'), 50)
-        self.create_subscription(PoseStamped, fused_t, lambda m: self.on_pose(m, 'fused'), 50)
+        self.create_subscription(Odometry, fused_t, lambda m: self.on_odom(m, 'fused'), 50)
 
         import matplotlib
         if os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'):
@@ -171,12 +170,6 @@ class LivePlotter(Node):
 
     def on_odom(self, msg: Odometry, name: str):
         p = msg.pose.pose.position
-        self.paths[name]['x'].append(float(p.x))
-        self.paths[name]['y'].append(float(p.y))
-        self.dirty = True
-
-    def on_pose(self, msg: PoseStamped, name: str):
-        p = msg.pose.position
         self.paths[name]['x'].append(float(p.x))
         self.paths[name]['y'].append(float(p.y))
         self.dirty = True

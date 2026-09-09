@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Live ZED + lidar fusion → geometry_msgs/PoseStamped.
+"""Live ZED + lidar fusion → nav_msgs/Odometry.
 
 Lidar-primary: SE2-align corrected rf2o to ZED, blend XY, yaw/z from ZED.
-Output type matches /zed/zed_node/pose so the flight stack can remount the topic.
+Publishes on /odometry/filtered by default (nav_msgs/Odometry).
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import math
 from collections import deque
 
 import rclpy
-from geometry_msgs.msg import PoseStamped, Quaternion, TransformStamped
+from geometry_msgs.msg import Quaternion, TransformStamped
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from tf2_ros import TransformBroadcaster
@@ -37,10 +37,9 @@ class RelativeFuse(Node):
         super().__init__('relative_fuse')
         self.declare_parameter('zed_topic', '/zed/zed_node/odom')
         self.declare_parameter('lidar_topic', '/lidar/odom')
-        # Same type as /zed/zed_node/pose — remount name only when wiring to FC
         self.declare_parameter('output_topic', '/odometry/filtered')
-        self.declare_parameter('output_frame_id', '')  # empty → use ZED odom frame_id
-        self.declare_parameter('odom_frame', 'odom_fused')  # TF parent if publish_tf
+        self.declare_parameter('output_frame_id', '')  # empty → odom_frame
+        self.declare_parameter('odom_frame', 'odom_fused')
         self.declare_parameter('base_frame', 'base_link')
         self.declare_parameter('publish_tf', True)
         self.declare_parameter('w_zed', 0.15)
@@ -60,7 +59,6 @@ class RelativeFuse(Node):
         self.publish_tf = bool(self.get_parameter('publish_tf').value)
 
         self.zed = None  # (t, x, y, z, yaw)
-        self.zed_frame = 'odom'
         self.lidar_buf = deque()
         self.aligned = False
         self.dth = 0.0
@@ -68,7 +66,7 @@ class RelativeFuse(Node):
         self.ty = 0.0
 
         out = self.get_parameter('output_topic').value
-        self.pub = self.create_publisher(PoseStamped, out, 30)
+        self.pub = self.create_publisher(Odometry, out, 30)
         self.tf_br = TransformBroadcaster(self) if self.publish_tf else None
 
         zed_t = self.get_parameter('zed_topic').value
@@ -77,7 +75,7 @@ class RelativeFuse(Node):
         self.create_subscription(Odometry, lidar_t, self.on_lidar, 30)
         self.get_logger().info(
             f'Lidar-primary fuse {zed_t} + {lidar_t} -> {out} '
-            f'(PoseStamped, w_zed={self.w_zed:.2f}, w_lidar={self.w_lidar:.2f})'
+            f'(Odometry, w_zed={self.w_zed:.2f}, w_lidar={self.w_lidar:.2f})'
         )
 
     def on_lidar(self, msg: Odometry):
@@ -94,8 +92,6 @@ class RelativeFuse(Node):
         t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         p = msg.pose.pose.position
         self.zed = (t, p.x, p.y, p.z, yaw_of(msg.pose.pose.orientation))
-        if msg.header.frame_id:
-            self.zed_frame = msg.header.frame_id
 
     def _lidar_latest(self):
         return self.lidar_buf[-1] if self.lidar_buf else None
@@ -135,16 +131,19 @@ class RelativeFuse(Node):
         self._publish(stamp, x, y, zz, yaw)
 
     def _publish(self, stamp, x, y, z, yaw):
-        frame = self.output_frame_id or self.zed_frame or self.odom_frame
         q = quat_from_yaw(yaw)
-
-        out = PoseStamped()
+        out = Odometry()
         out.header.stamp = stamp
-        out.header.frame_id = frame
-        out.pose.position.x = x
-        out.pose.position.y = y
-        out.pose.position.z = z  # height from ZED (XY fused; Z not from lidar)
-        out.pose.orientation = q
+        out.header.frame_id = self.output_frame_id or self.odom_frame
+        out.child_frame_id = self.base_frame
+        out.pose.pose.position.x = x
+        out.pose.pose.position.y = y
+        out.pose.pose.position.z = z  # height from ZED (XY fused; Z not from lidar)
+        out.pose.pose.orientation = q
+        cov = [0.0] * 36
+        cov[0] = cov[7] = 0.05
+        cov[35] = 0.02
+        out.pose.covariance = cov
         self.pub.publish(out)
 
         if self.tf_br is not None:

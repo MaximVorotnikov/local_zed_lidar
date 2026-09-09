@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Record ZED / lidar odom + fused PoseStamped to CSV."""
+"""Record ZED / lidar / fused odometry to CSV."""
 
 import csv
 import math
 from pathlib import Path
 
 import rclpy
-from geometry_msgs.msg import PoseStamped, Quaternion
+from geometry_msgs.msg import Quaternion
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 
@@ -41,20 +41,15 @@ class TrajectoryRecorder(Node):
         fused_t = self.get_parameter('fused_topic').value
         self.create_subscription(Odometry, zed_t, lambda m: self.on_odom(m, 'zed'), 50)
         self.create_subscription(Odometry, lidar_t, lambda m: self.on_odom(m, 'lidar'), 50)
-        self.create_subscription(PoseStamped, fused_t, lambda m: self.on_pose(m, 'fused'), 50)
-
-    def _write(self, name, t, x, y, z, yaw):
-        self.writers[name].writerow([f'{t:.6f}', f'{x:.6f}', f'{y:.6f}', f'{z:.6f}', f'{yaw:.6f}'])
+        self.create_subscription(Odometry, fused_t, lambda m: self.on_odom(m, 'fused'), 50)
 
     def on_odom(self, msg: Odometry, name: str):
         t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         p = msg.pose.pose.position
-        self._write(name, t, p.x, p.y, p.z, yaw_of(msg.pose.pose.orientation))
-
-    def on_pose(self, msg: PoseStamped, name: str):
-        t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-        p = msg.pose.position
-        self._write(name, t, p.x, p.y, p.z, yaw_of(msg.pose.orientation))
+        yaw = yaw_of(msg.pose.pose.orientation)
+        self.writers[name].writerow(
+            [f'{t:.6f}', f'{p.x:.6f}', f'{p.y:.6f}', f'{p.z:.6f}', f'{yaw:.6f}']
+        )
 
     def destroy_node(self):
         for f in self.files.values():
