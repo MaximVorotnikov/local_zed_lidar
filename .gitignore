@@ -6,3 +6,6 @@ flight_bag.zip
 **/__pycache__/
 *.pyc
 .ros/
+flight_bags/
+*.db3
+*.zip
