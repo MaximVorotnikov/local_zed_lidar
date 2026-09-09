@@ -88,12 +88,21 @@ source install/setup.bash
 
 # 1) Start your real system (ZED node, lidar driver, …)
 
-# 2) Start fuse (wall clock, no bag)
+# 2) Start fuse (wall clock, no bag) — web plot on LAN by default
 ros2 launch ekf_bag_tuner fuse_realtime.launch.py \
-  use_plot:=true \
+  use_web_plot:=true \
+  use_plot:=false \
   use_rviz:=false \
   fused_pose_topic:=/odometry/filtered
 ```
+
+Open on this PC or any phone/laptop on the same Wi‑Fi (URL also printed in the log):
+
+```text
+http://<LAN-IP>:8765/
+```
+
+Optional: local matplotlib window with `use_plot:=true`. Port: `web_plot_port:=8765`.
 
 Check type/topic:
 

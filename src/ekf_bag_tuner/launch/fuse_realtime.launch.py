@@ -27,6 +27,7 @@ def generate_launch_description():
 
     use_rviz = LaunchConfiguration('use_rviz')
     use_plot = LaunchConfiguration('use_plot')
+    use_web_plot = LaunchConfiguration('use_web_plot')
     use_recorder = LaunchConfiguration('use_recorder')
     output_dir = LaunchConfiguration('output_dir')
     fused_pose_topic = LaunchConfiguration('fused_pose_topic')
@@ -35,10 +36,12 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument('use_rviz', default_value='false'),
-        DeclareLaunchArgument('use_plot', default_value='true'),
+        DeclareLaunchArgument('use_plot', default_value='false'),
+        DeclareLaunchArgument('use_web_plot', default_value='true'),
+        DeclareLaunchArgument('web_plot_port', default_value='8765'),
         DeclareLaunchArgument('use_recorder', default_value='false'),
         DeclareLaunchArgument('output_dir', default_value=default_out),
-        # Remount to /zed/zed_node/pose when wiring into the flight stack
+        # Remount name of fused Odometry topic if needed
         DeclareLaunchArgument('fused_pose_topic', default_value='/odometry/filtered'),
         DeclareLaunchArgument('scan_topic', default_value='/scan'),
         DeclareLaunchArgument('zed_odom_topic', default_value='/zed/zed_node/odom'),
@@ -154,6 +157,22 @@ def generate_launch_description():
                 'output_dir': output_dir,
                 'update_hz': 5.0,
                 'save_on_shutdown': True,
+                'zed_topic': zed_odom_topic,
+                'lidar_topic': '/lidar/odom',
+                'fused_topic': fused_pose_topic,
+            }],
+        ),
+
+        Node(
+            package='ekf_bag_tuner',
+            executable='web_plotter',
+            name='web_plotter',
+            condition=IfCondition(use_web_plot),
+            output='screen',
+            parameters=[{
+                'host': '0.0.0.0',
+                'port': ParameterValue(
+                    LaunchConfiguration('web_plot_port'), value_type=int),
                 'zed_topic': zed_odom_topic,
                 'lidar_topic': '/lidar/odom',
                 'fused_topic': fused_pose_topic,

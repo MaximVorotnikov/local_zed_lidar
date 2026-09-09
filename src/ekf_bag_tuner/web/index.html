@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Live trajectories</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --text: #e7ecf3;
+      --muted: #8b9bb4;
+      --grid: #2a3548;
+      --zed: #4da3ff;
+      --lidar: #3dd68c;
+      --fused: #ff5c5c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      padding: 0.75rem 1rem;
+      background: var(--panel);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem 1.25rem;
+      align-items: center;
+      border-bottom: 1px solid #243044;
+    }
+    h1 {
+      margin: 0;
+      font-size: 1.05rem;
+      font-weight: 600;
+    }
+    .status { color: var(--muted); font-size: 0.85rem; }
+    .status.ok { color: var(--lidar); }
+    .status.err { color: var(--fused); }
+    .legend {
+      display: flex;
+      gap: 1rem;
+      font-size: 0.85rem;
+    }
+    .legend span::before {
+      content: "";
+      display: inline-block;
+      width: 0.7rem;
+      height: 0.7rem;
+      border-radius: 2px;
+      margin-right: 0.35rem;
+      vertical-align: -0.05rem;
+    }
+    .legend .zed::before { background: var(--zed); }
+    .legend .lidar::before { background: var(--lidar); }
+    .legend .fused::before { background: var(--fused); }
+    button {
+      background: #2b3b55;
+      color: var(--text);
+      border: 1px solid #3a4f70;
+      border-radius: 6px;
+      padding: 0.35rem 0.75rem;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+    button:hover { background: #354866; }
+    main {
+      flex: 1;
+      padding: 0.5rem;
+      min-height: 0;
+    }
+    canvas {
+      width: 100%;
+      height: calc(100vh - 4.5rem);
+      background: #121821;
+      border-radius: 8px;
+      border: 1px solid #243044;
+      touch-action: none;
+      cursor: grab;
+    }
+    canvas:active { cursor: grabbing; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ZED / lidar / fused</h1>
+    <div class="legend">
+      <span class="zed">zed</span>
+      <span class="lidar">lidar</span>
+      <span class="fused">fused</span>
+    </div>
+    <button type="button" id="fitBtn">Fit all</button>
+    <div class="status" id="status">connecting…</div>
+  </header>
+  <main>
+    <canvas id="plot"></canvas>
+  </main>
+  <script>
+    const COLORS = { zed: '#4da3ff', lidar: '#3dd68c', fused: '#ff5c5c' };
+    const NAMES = ['zed', 'lidar', 'fused'];
+    const canvas = document.getElementById('plot');
+    const ctx = canvas.getContext('2d');
+    const statusEl = document.getElementById('status');
+    const fitBtn = document.getElementById('fitBtn');
+
+    let paths = { zed: {x:[], y:[]}, lidar: {x:[], y:[]}, fused: {x:[], y:[]} };
+    let follow = true;
+    let view = { cx: 0, cy: 0, half: 1.5 };
+    let drag = null;
+
+    function resize() {
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = Math.max(1, Math.floor(rect.width * dpr));
+      canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      draw();
+    }
+    window.addEventListener('resize', resize);
+
+    function worldToPx(x, y, w, h) {
+      const s = Math.min(w, h) / (2 * view.half);
+      const px = w / 2 + (x - view.cx) * s;
+      const py = h / 2 - (y - view.cy) * s;
+      return [px, py];
+    }
+
+    function pxToWorld(px, py, w, h) {
+      const s = Math.min(w, h) / (2 * view.half);
+      const x = view.cx + (px - w / 2) / s;
+      const y = view.cy - (py - h / 2) / s;
+      return [x, y];
+    }
+
+    function fitToData() {
+      let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
+      let any = false;
+      for (const name of NAMES) {
+        const xs = paths[name].x, ys = paths[name].y;
+        for (let i = 0; i < xs.length; i++) {
+          any = true;
+          xmin = Math.min(xmin, xs[i]); xmax = Math.max(xmax, xs[i]);
+          ymin = Math.min(ymin, ys[i]); ymax = Math.max(ymax, ys[i]);
+        }
+      }
+      if (!any) {
+        view = { cx: 0, cy: 0, half: 1.5 };
+        return;
+      }
+      const cx = 0.5 * (xmin + xmax);
+      const cy = 0.5 * (ymin + ymax);
+      const half = 0.5 * Math.max(xmax - xmin, ymax - ymin, 2.0) + 0.5;
+      view = { cx, cy, half };
+    }
+
+    function drawGrid(w, h) {
+      ctx.strokeStyle = '#2a3548';
+      ctx.lineWidth = 1;
+      const stepGuess = view.half / 4;
+      const mag = Math.pow(10, Math.floor(Math.log10(stepGuess)));
+      const norm = stepGuess / mag;
+      const step = (norm < 1.5 ? 1 : norm < 3.5 ? 2 : 5) * mag;
+      const x0 = Math.floor((view.cx - view.half) / step) * step;
+      const y0 = Math.floor((view.cy - view.half) / step) * step;
+      ctx.beginPath();
+      for (let x = x0; x <= view.cx + view.half + 1e-9; x += step) {
+        const [px] = worldToPx(x, 0, w, h);
+        ctx.moveTo(px, 0); ctx.lineTo(px, h);
+      }
+      for (let y = y0; y <= view.cy + view.half + 1e-9; y += step) {
+        const [, py] = worldToPx(0, y, w, h);
+        ctx.moveTo(0, py); ctx.lineTo(w, py);
+      }
+      ctx.stroke();
+
+      // axes
+      ctx.strokeStyle = '#3a4f70';
+      ctx.beginPath();
+      const [ox, oy] = worldToPx(0, 0, w, h);
+      ctx.moveTo(0, oy); ctx.lineTo(w, oy);
+      ctx.moveTo(ox, 0); ctx.lineTo(ox, h);
+      ctx.stroke();
+    }
+
+    function drawPath(name, w, h) {
+      const xs = paths[name].x, ys = paths[name].y;
+      if (!xs.length) return;
+      ctx.strokeStyle = COLORS[name];
+      ctx.lineWidth = name === 'fused' ? 2.5 : 1.6;
+      ctx.beginPath();
+      for (let i = 0; i < xs.length; i++) {
+        const [px, py] = worldToPx(xs[i], ys[i], w, h);
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+
+      const [sx, sy] = worldToPx(xs[0], ys[0], w, h);
+      const [cx, cy] = worldToPx(xs[xs.length - 1], ys[ys.length - 1], w, h);
+      ctx.fillStyle = COLORS[name];
+      ctx.beginPath(); ctx.arc(sx, sy, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = COLORS[name];
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(cx - 5, cy - 5); ctx.lineTo(cx + 5, cy + 5);
+      ctx.moveTo(cx + 5, cy - 5); ctx.lineTo(cx - 5, cy + 5);
+      ctx.stroke();
+    }
+
+    function draw() {
+      const rect = canvas.getBoundingClientRect();
+      const w = rect.width, h = rect.height;
+      ctx.clearRect(0, 0, w, h);
+      if (follow) fitToData();
+      drawGrid(w, h);
+      for (const name of NAMES) drawPath(name, w, h);
+      ctx.fillStyle = '#8b9bb4';
+      ctx.font = '12px sans-serif';
+      ctx.fillText(follow ? 'AUTO-FIT' : 'MANUAL', 10, 18);
+      ctx.fillText(`half=${view.half.toFixed(2)} m`, 10, 34);
+    }
+
+    fitBtn.addEventListener('click', () => {
+      follow = true;
+      draw();
+    });
+
+    canvas.addEventListener('pointerdown', (e) => {
+      canvas.setPointerCapture(e.pointerId);
+      const rect = canvas.getBoundingClientRect();
+      drag = { x: e.clientX - rect.left, y: e.clientY - rect.top, cx: view.cx, cy: view.cy };
+      follow = false;
+    });
+    canvas.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left, y = e.clientY - rect.top;
+      const s = Math.min(rect.width, rect.height) / (2 * view.half);
+      view.cx = drag.cx - (x - drag.x) / s;
+      view.cy = drag.cy + (y - drag.y) / s;
+      draw();
+    });
+    canvas.addEventListener('pointerup', () => { drag = null; });
+    canvas.addEventListener('pointercancel', () => { drag = null; });
+
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      follow = false;
+      const rect = canvas.getBoundingClientRect();
+      const px = e.clientX - rect.left, py = e.clientY - rect.top;
+      const [wx, wy] = pxToWorld(px, py, rect.width, rect.height);
+      const factor = e.deltaY < 0 ? 0.85 : 1.18;
+      view.half = Math.max(0.2, Math.min(200, view.half * factor));
+      const [nx, ny] = pxToWorld(px, py, rect.width, rect.height);
+      view.cx += wx - nx;
+      view.cy += wy - ny;
+      draw();
+    }, { passive: false });
+
+    async function poll() {
+      try {
+        const res = await fetch('/api/paths', { cache: 'no-store' });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        paths = await res.json();
+        statusEl.textContent = 'live';
+        statusEl.className = 'status ok';
+        draw();
+      } catch (err) {
+        statusEl.textContent = 'offline: ' + err.message;
+        statusEl.className = 'status err';
+      }
+    }
+
+    resize();
+    poll();
+    setInterval(poll, 200);
+  </script>
+</body>
+</html>

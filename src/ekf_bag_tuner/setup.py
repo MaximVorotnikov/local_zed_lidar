@@ -15,6 +15,7 @@ setup(
         (os.path.join('share', package_name, 'launch'), glob('launch/*.py')),
         (os.path.join('share', package_name, 'rviz'), glob('rviz/*')),
         (os.path.join('share', package_name, 'scripts'), glob('scripts/*')),
+        (os.path.join('share', package_name, 'web'), glob('web/*')),
     ],
     install_requires=['setuptools', 'numpy', 'matplotlib', 'pyyaml'],
     zip_safe=True,
@@ -30,6 +31,7 @@ setup(
             'offline_fuse = ekf_bag_tuner.offline_fuse:main',
             'relative_fuse = ekf_bag_tuner.relative_fuse:main',
             'live_plotter = ekf_bag_tuner.live_plotter:main',
+            'web_plotter = ekf_bag_tuner.web_plotter:main',
         ],
     },
 )
