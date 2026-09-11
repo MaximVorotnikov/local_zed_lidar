@@ -23,7 +23,7 @@ import os
 def generate_launch_description():
     pkg = get_package_share_directory('ekf_bag_tuner')
     rviz_cfg = os.path.join(pkg, 'rviz', 'fuse.rviz')
-    default_out = '/home/max/local_zed_lidar/ekf_tuning_output'
+    default_out = os.path.join(os.path.expanduser('~'), 'local_zed_lidar', 'ekf_tuning_output')
 
     use_rviz = LaunchConfiguration('use_rviz')
     use_plot = LaunchConfiguration('use_plot')
@@ -60,19 +60,26 @@ def generate_launch_description():
             package='tf2_ros',
             executable='static_transform_publisher',
             name='base_to_zed',
-            arguments=['0', '0', '0', '0', '0', '0', 'base_link', 'zed_camera_link'],
+            arguments=[
+                '--x', '0', '--y', '0', '--z', '0',
+                '--yaw', '0', '--pitch', '0', '--roll', '0',
+                '--frame-id', 'base_link',
+                '--child-frame-id', 'zed_camera_link',
+            ],
         ),
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
             name='base_to_laser',
             arguments=[
-                LaunchConfiguration('laser_x'),
-                LaunchConfiguration('laser_y'),
-                LaunchConfiguration('laser_z'),
-                LaunchConfiguration('laser_yaw'),
-                '0', '0',
-                'base_link', 'laser',
+                '--x', LaunchConfiguration('laser_x'),
+                '--y', LaunchConfiguration('laser_y'),
+                '--z', LaunchConfiguration('laser_z'),
+                '--yaw', LaunchConfiguration('laser_yaw'),
+                '--pitch', '0',
+                '--roll', '0',
+                '--frame-id', 'base_link',
+                '--child-frame-id', 'laser',
             ],
         ),
 
@@ -176,6 +183,8 @@ def generate_launch_description():
                 'zed_topic': zed_odom_topic,
                 'lidar_topic': '/lidar/odom',
                 'fused_topic': fused_pose_topic,
+                'log_enable': True,
+                'output_dir': output_dir,
             }],
         ),
 

@@ -95,6 +95,21 @@
       <span class="fused">fused</span>
     </div>
     <button type="button" id="fitBtn">Fit all</button>
+    <span id="replayControls" style="display:none; gap:0.4rem; align-items:center;">
+      <button type="button" id="playBtn">Pause</button>
+      <button type="button" id="restartBtn">Restart</button>
+      <label style="font-size:0.85rem; color:var(--muted);">
+        speed
+        <select id="speedSel">
+          <option value="0.5">0.5×</option>
+          <option value="1" selected>1×</option>
+          <option value="2">2×</option>
+          <option value="4">4×</option>
+          <option value="8">8×</option>
+        </select>
+      </label>
+      <input type="range" id="seekBar" min="0" max="1000" value="0" style="width:10rem;" />
+    </span>
     <div class="status" id="status">connecting…</div>
   </header>
   <main>
@@ -329,12 +344,68 @@
       draw();
     }, { passive: false });
 
+    const replayControls = document.getElementById('replayControls');
+    const playBtn = document.getElementById('playBtn');
+    const restartBtn = document.getElementById('restartBtn');
+    const speedSel = document.getElementById('speedSel');
+    const seekBar = document.getElementById('seekBar');
+    let seeking = false;
+    let isReplay = false;
+
+    async function replayAction(body) {
+      const res = await fetch('/api/replay', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    }
+
+    playBtn.addEventListener('click', async () => {
+      try { await replayAction({ action: 'toggle' }); } catch (e) {}
+    });
+    restartBtn.addEventListener('click', async () => {
+      try { await replayAction({ action: 'restart' }); follow = true; } catch (e) {}
+    });
+    speedSel.addEventListener('change', async () => {
+      try {
+        await replayAction({ action: 'set_speed', speed: parseFloat(speedSel.value) });
+      } catch (e) {}
+    });
+    seekBar.addEventListener('pointerdown', () => { seeking = true; });
+    seekBar.addEventListener('pointerup', async () => {
+      seeking = false;
+      if (!isReplay) return;
+      const tEnd = parseFloat(seekBar.dataset.tend || '0');
+      const t = (seekBar.value / 1000) * tEnd;
+      try { await replayAction({ action: 'seek', t }); } catch (e) {}
+    });
+
     async function poll() {
       try {
         const res = await fetch('/api/paths', { cache: 'no-store' });
         if (!res.ok) throw new Error('HTTP ' + res.status);
-        paths = await res.json();
-        statusEl.textContent = 'live';
+        const data = await res.json();
+        const meta = data._meta || {};
+        paths = {
+          zed: data.zed || {x:[], y:[]},
+          lidar: data.lidar || {x:[], y:[]},
+          fused: data.fused || {x:[], y:[]},
+        };
+        isReplay = meta.mode === 'replay';
+        replayControls.style.display = isReplay ? 'inline-flex' : 'none';
+        if (isReplay) {
+          const t = meta.t || 0;
+          const tEnd = meta.t_end || 0;
+          seekBar.dataset.tend = String(tEnd);
+          if (!seeking && tEnd > 0) seekBar.value = String(Math.round(1000 * t / tEnd));
+          playBtn.textContent = meta.playing ? 'Pause' : 'Play';
+          statusEl.textContent = `replay ${t.toFixed(1)}s / ${tEnd.toFixed(1)}s ×${meta.speed || 1}`;
+        } else {
+          const logHint = meta.log_path ? ' · logging' : '';
+          statusEl.textContent = 'live' + logHint;
+        }
         statusEl.className = 'status ok';
         draw();
       } catch (err) {

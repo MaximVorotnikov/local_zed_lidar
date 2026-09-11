@@ -48,7 +48,12 @@ class LivePlotter(Node):
         self.create_subscription(Odometry, fused_t, lambda m: self.on_odom(m, 'fused'), 50)
 
         import matplotlib
-        if os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'):
+        self.headless = not (
+            os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')
+        )
+        if self.headless:
+            matplotlib.use('Agg', force=True)
+        else:
             for backend in ('TkAgg', 'Qt5Agg', 'QtAgg'):
                 try:
                     matplotlib.use(backend, force=True)
@@ -59,7 +64,8 @@ class LivePlotter(Node):
         from matplotlib.widgets import Button
 
         self.plt = plt
-        plt.ion()
+        if not self.headless:
+            plt.ion()
         self.fig, self.ax = plt.subplots(figsize=(9, 8))
         try:
             self.fig.canvas.manager.set_window_title('Live trajectories: ZED / lidar / fused')
@@ -93,23 +99,29 @@ class LivePlotter(Node):
         self.ax.set_xlim(-1.0, 1.0)
         self.ax.set_ylim(-1.0, 1.0)
 
-        # Fit button — restore auto follow
-        ax_btn = self.fig.add_axes([0.40, 0.02, 0.20, 0.045])
-        self.btn_fit = Button(ax_btn, 'Fit all (A)')
-        self.btn_fit.on_clicked(lambda _evt: self.enable_follow())
+        if not self.headless:
+            # Fit button — restore auto follow
+            ax_btn = self.fig.add_axes([0.40, 0.02, 0.20, 0.045])
+            self.btn_fit = Button(ax_btn, 'Fit all (A)')
+            self.btn_fit.on_clicked(lambda _evt: self.enable_follow())
 
-        self.ax.callbacks.connect('xlim_changed', self._on_limits_changed)
-        self.ax.callbacks.connect('ylim_changed', self._on_limits_changed)
-        self.fig.canvas.mpl_connect('key_press_event', self._on_key)
-        self.fig.canvas.mpl_connect('scroll_event', self._on_scroll)
-
-        plt.show(block=False)
+            self.ax.callbacks.connect('xlim_changed', self._on_limits_changed)
+            self.ax.callbacks.connect('ylim_changed', self._on_limits_changed)
+            self.fig.canvas.mpl_connect('key_press_event', self._on_key)
+            self.fig.canvas.mpl_connect('scroll_event', self._on_scroll)
+            plt.show(block=False)
 
         period = 1.0 / max(update_hz, 0.5)
         self.create_timer(period, self.refresh)
-        self.get_logger().info(
-            'Live plot ready: toolbar zoom/pan work; press A or "Fit all" to reframe'
-        )
+        if self.headless:
+            self.get_logger().warn(
+                'No DISPLAY — running headless (Agg). Prefer web_plotter; '
+                'PNG saved on shutdown if output_dir is set'
+            )
+        else:
+            self.get_logger().info(
+                'Live plot ready: toolbar zoom/pan work; press A or "Fit all" to reframe'
+            )
 
     def _update_title(self):
         mode = 'AUTO-FIT' if self.follow_data else 'MANUAL ZOOM'
@@ -248,16 +260,13 @@ class LivePlotter(Node):
 
 
 def main():
-    if not (os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')):
-        print('live_plotter: no DISPLAY, skipping plot window')
-        return
-
     rclpy.init()
     node = LivePlotter()
     try:
         while rclpy.ok():
             rclpy.spin_once(node, timeout_sec=0.05)
-            node.plt.pause(0.001)
+            if not node.headless:
+                node.plt.pause(0.001)
     except KeyboardInterrupt:
         pass
     finally:
