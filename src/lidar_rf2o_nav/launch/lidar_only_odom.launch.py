@@ -2,8 +2,7 @@
 """Lidar-only odometry (rf2o) → /odometry/filtered. No ZED.
 
 Pipeline:
-  /scan → scan_downsampler → /scan_for_odom
-  /scan_for_odom → rf2o → /lidar/odom_raw
+  /scan → rf2o → /lidar/odom_raw
   /lidar/odom_raw → lidar_odom_publisher → /odometry/filtered (+ TF odom→base_link)
 
 Optional: ekf_bag_tuner web_plotter on :8765 (same UI as fuse_realtime).
@@ -23,17 +22,13 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 def generate_launch_description():
     scan_topic = LaunchConfiguration('scan_topic')
-    scan_for_odom = LaunchConfiguration('scan_for_odom_topic')
     odom_topic = LaunchConfiguration('odom_topic')
-    scan_stride = LaunchConfiguration('scan_stride')
-    max_beams = LaunchConfiguration('max_beams')
     rf2o_freq = LaunchConfiguration('rf2o_freq')
     use_web_plot = LaunchConfiguration('use_web_plot')
     default_out = os.path.join(os.path.expanduser('~'), 'local_zed_lidar', 'ekf_tuning_output')
 
     return LaunchDescription([
         DeclareLaunchArgument('scan_topic', default_value='/scan'),
-        DeclareLaunchArgument('scan_for_odom_topic', default_value='/scan_for_odom'),
         DeclareLaunchArgument('odom_topic', default_value='/odometry/filtered'),
         DeclareLaunchArgument('odom_frame', default_value='odom'),
         DeclareLaunchArgument('base_frame', default_value='base_link'),
@@ -46,9 +41,7 @@ def generate_launch_description():
         DeclareLaunchArgument('negate_y', default_value='true'),
         DeclareLaunchArgument('negate_yaw', default_value='false'),
         DeclareLaunchArgument('publish_tf', default_value='true'),
-        # stride=2 roughly halves rf2o cost; raise to 3 if rate still << 15 Hz.
-        DeclareLaunchArgument('scan_stride', default_value='1'),
-        DeclareLaunchArgument('max_beams', default_value='0'),
+        # rf2o poll rate; actual odom Hz is capped by /scan (~15 Hz).
         DeclareLaunchArgument('rf2o_freq', default_value='20.0'),
         DeclareLaunchArgument('use_web_plot', default_value='true'),
         DeclareLaunchArgument('web_plot_port', default_value='8765'),
@@ -74,26 +67,13 @@ def generate_launch_description():
         ),
 
         Node(
-            package='lidar_rf2o_nav',
-            executable='scan_downsampler',
-            name='scan_downsampler',
-            output='screen',
-            parameters=[{
-                'input_topic': scan_topic,
-                'output_topic': scan_for_odom,
-                'stride': ParameterValue(scan_stride, value_type=int),
-                'max_beams': ParameterValue(max_beams, value_type=int),
-            }],
-        ),
-
-        Node(
             package='rf2o_laser_odometry',
             executable='rf2o_laser_odometry_node',
             name='rf2o_laser_odometry',
             output='screen',
             parameters=[{
                 'use_sim_time': False,
-                'laser_scan_topic': scan_for_odom,
+                'laser_scan_topic': scan_topic,
                 'odom_topic': '/lidar/odom_raw',
                 'publish_tf': False,
                 'base_frame_id': LaunchConfiguration('base_frame'),

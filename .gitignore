@@ -9,3 +9,4 @@ flight_bag.zip
 flight_bags/
 *.db3
 *.zip
+ekf_tuning_output/
